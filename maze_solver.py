@@ -1,19 +1,12 @@
 import cv2
-import numpy as np
-from heapq import heappush, heappop
+import numpy
 """
 TODO: solve a maze via image
 grab contours find the outer most contour and extrapulate the exits of the maze
 
-
-maze class
-start point
-end point
-maze
-altered_maze
 solved_maze store
 """
-
+DIRECTIONS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
 class Maze:
 
     def __init__(self, image):
@@ -23,21 +16,11 @@ class Maze:
         self.start_point = None
         self.end_point = None
 
-    def find_outer_bounds(self):
-        gray = cv2.cvtColor(self.orginal_maze, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        cv2.drawContours(self.orginal_maze, [contours[0]], -1, (0, 255, 0), 2)
-        cv2.imshow('Image with Contours', self.orginal_maze)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
     def find_skeleton_path(self, inset = 1):
         gray = cv2.cvtColor(self.orginal_maze, cv2.COLOR_BGR2GRAY)
         _, black_white_bin = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
 
-        mask = np.ones_like(black_white_bin, dtype=np.uint8) * 255
+        mask = numpy.ones_like(black_white_bin, dtype=numpy.uint8) * 255
         mask[:inset, :] = 0  # Top border
         mask[-inset:, :] = 0  # Bottom border
         mask[:, :inset] = 0  # Left border
@@ -69,18 +52,62 @@ class Maze:
         # Set the start point as the first end point and the end point as the second end point
         self.start_point = end_points[0]
         self.end_point = end_points[1]
-        print(len(end_points))
-        print(self.start_point)
-        print(self.end_point)
 
+    def heuristic(self, a, b):
+        return numpy.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
+
+    def reconstruct_path(self, came_from, current):
+        total_path = [current]
+        while current in came_from.keys():
+            current = came_from[current]
+            total_path.insert(0, current)
+        return total_path
+    
+    def get_neighbors(self, node):
+        x, y = node
+        neighbors = []
+        for direction_x, direction_y in DIRECTIONS:
+            neighbor_x, neighbor_y = x + direction_x, y + direction_y
+            if 0 <= neighbor_x < self.skeleton.shape[1] and 0 <= neighbor_y < self.skeleton.shape[0] and self.skeleton[neighbor_y, neighbor_x] == 255:
+                neighbors.append((neighbor_x, neighbor_y))
+        return neighbors
+    
+    def solve(self):
+        open_set = {self.start_point}
+        came_from = {}
+        g_score = {self.start_point: 0}
+        f_score = {self.start_point: self.heuristic(self.start_point, self.end_point)}
+
+        while open_set:
+            current = min(open_set, key=lambda x: f_score.get(x, float('inf')))
+            if current == self.end_point:
+                path = self.reconstruct_path(came_from, current)
+                # Mark the solution path in the solution_maze
+                self.solution_maze = numpy.copy(self.orginal_maze)
+                for point in path:
+                    cv2.circle(self.solution_maze, point, 2, (0, 0, 255), -1)
+                return path
+
+            open_set.remove(current)
+            for neighbor in self.get_neighbors(current):
+                tentative_g_score = g_score[current] + self.heuristic(current, neighbor)
+                if tentative_g_score < g_score.get(neighbor, float('inf')):
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + self.heuristic(neighbor, self.end_point)
+                    if neighbor not in open_set:
+                        open_set.add(neighbor)
+
+        return None
 
 if __name__ == "__main__":
-    image = cv2.imread("maze2.jpg")
+    image = cv2.imread("maze_test.jpg")
 
     maze = Maze(image)
     maze.find_skeleton_path()
     maze.find_end_points()
-    #maze.solve()
+    maze.solve()
+    cv2.imshow('Solution Maze', maze.solution_maze)
 
 
 cv2.waitKey(0)
