@@ -8,7 +8,6 @@ File Description:
 Library Resources:
 - pip install numpy
 - pip install opencv-python
-- pip install tensorflow
 
 Important References:
 - https://docs.opencv.org/4.x/df/d2d/group__ximgproc.html
@@ -17,6 +16,8 @@ Important References:
 #external libraries
 import cv2
 import numpy
+#internal libraries
+import maze_generator
 #--------------------------------Constants-----------------------------------------
 DIRECTIONS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
 #--------------------------------Maze_Class----------------------------------------
@@ -39,11 +40,9 @@ Functions:
     - heuristic: returns a heuristic value
     - get_neighbors: returns the surrounding valid neighbors
 """
-
-#TODO: default constructor for this class that makes a 500 by 500 pixel maze
-class Maze:
+class Maze_Solver:
     #----------------------------Initializer----------------------------------------
-    def __init__(self, image):
+    def __init__(self, image = maze_generator.Maze().maze_image):
         self.orginal_maze = image
         self.skeleton = None
         self.solution_maze = None
@@ -52,13 +51,14 @@ class Maze:
     def find_skeleton_path(self, inset = 1):
         #gray scale and then threshold to get a pure black and white image
         gray = cv2.cvtColor(self.orginal_maze, cv2.COLOR_BGR2GRAY)
-        _, black_white_bin = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
+        _, black_white_bin = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY)
+        #inverts the image, and then scales down the white pixel sections to
+        #cv2.imshow('bb', black_white_bin)
+        self.skeleton = cv2.ximgproc.thinning(black_white_bin)
 
         #inverts the image, and then scales down the white pixel sections to 
-        self.skeleton = cv2.ximgproc.thinning(~black_white_bin)
 
-        #Sets the border pixels to black base on the inset
-            # some images have 
+        #Sets the border pixels to black base on the inset,(avoids black border images)
         mask = numpy.ones_like(black_white_bin, dtype=numpy.uint8) * 255
         mask[:inset, :] = 0  # Top border
         mask[-inset:, :] = 0  # Bottom border
@@ -66,7 +66,7 @@ class Maze:
         mask[:, -inset:] = 0  # Right border
         self.skeleton = cv2.bitwise_and(self.skeleton, self.skeleton, mask=mask)
         
-        cv2.imshow('Skeleton Path', self.skeleton)#for debugging
+        #cv2.imshow('Skeleton Path', self.skeleton)#for debugging
 
     def find_exit_points(self, inset = 1):
         height, width = self.skeleton.shape
@@ -76,7 +76,7 @@ class Maze:
             if self.skeleton[inset, x] == 255:
                 self.exit_points.append((x, inset))
             if self.skeleton[height - (inset +1), x] == 255:
-                self.exit_points.append((x, height - 6))
+                self.exit_points.append((x, height - (inset+1)))
 
         # Iterate over the left and right edges to find end points
         for y in range(inset, height - inset):
@@ -110,10 +110,10 @@ class Maze:
             solved_path.insert(0, current)
 
         return solved_path
-    
+    #solves for maze solution paths via A*
     def solve(self):
         solutions = []
-        
+        #look for a path between each exit point
         for start_point in range(len(self.exit_points)):
             for end_point in range(start_point + 1, len(self.exit_points)):
                 start_point = self.exit_points[start_point]
@@ -129,40 +129,38 @@ class Maze:
                 #gives a position a prediction cost, prediction_cost = cost from start + distance from end_point
                 cost_from_prediction = {start_point: self.distance_away(start_point, end_point)}#also known as f score
 
-
+                #while there are paths to explore explore the cheapest predicted path and remove the current pixel from the list
                 while paths_to_explore:
                     current = min(paths_to_explore , key=lambda x: cost_from_prediction.get(x, float('inf')))
                     paths_to_explore.remove(current)
-                    
+                    #if we reach the end_point add the path to the list of solutions
                     if current == end_point:
                         path = self.reconstruct_path(parent_pixel, current)
                         solutions.append(path)
                         break
-
+                    #look at all neighbors of the current pixel
                     for neighbor in self.get_neighbors(current):
-                        if neighbor not in cost_from_start:#if not cost_from_start[neighbor]
-                            parent_pixel[neighbor] = current
+                        if neighbor not in cost_from_start: #avoid pixels we have already looked at
+                            parent_pixel[neighbor] = current #set the parent of the neighbor pixels to the current pixel
+                            #set its current cost and its predicted cost adds it to the list to be explored
                             cost_from_start[neighbor] = cost_from_start[current] + self.distance_away(current, neighbor)
                             cost_from_prediction[neighbor] = cost_from_start[neighbor] + self.distance_away(neighbor, end_point)
-                            if neighbor not in paths_to_explore:
-                                paths_to_explore.add(neighbor)
+                            paths_to_explore.add(neighbor)
 
-        # Mark the solution paths in the solution_maze
+        # Mark the solution paths onto the orginal image 
         self.solution_maze = numpy.copy(self.orginal_maze)
         for path in solutions:
             for point in path:
                 cv2.circle(self.solution_maze, point, 2, (0, 0, 255), -1)
 
-        return None
-
 if __name__ == "__main__":
-    image = cv2.imread("maze2.jpg")
-
-    maze = Maze(image)
+    
+    maze = Maze_Solver()
     maze.find_skeleton_path()
     maze.find_exit_points()
     maze.solve()
     cv2.imshow('Solution Maze', maze.solution_maze)
+    
 
 
 cv2.waitKey(0)
